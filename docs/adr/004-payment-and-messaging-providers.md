@@ -31,19 +31,26 @@ regional quirks) are documented per-integration.
 
 ### Messaging / WhatsApp
 
-**Primary approach: WhatsApp Business API via intermediary (Twilio).**
+**Both providers implemented: Meta Cloud API (direct) and Twilio.**
 
-Direct access to the WhatsApp Business API requires Meta approval and infrastructure
-setup. Intermediaries like Twilio abstract this complexity while providing a stable,
-documented REST API with webhook support.
+The goal is to cover the full spectrum of client scenarios:
 
-| Option | Status |
-|---|---|
-| Twilio (WhatsApp) | Primary implementation |
-| Meta Cloud API (direct) | Planned — for clients who already have Meta Business approval |
+| Provider | Status | Use case |
+|---|---|---|
+| **Meta Cloud API** | Implemented | Clients with Meta Business Manager approval. No per-message cost beyond infra. Full control over the WhatsApp Business Account. |
+| **Twilio** | Implemented | Clients without Meta approval or who prefer a managed service. Faster setup, per-message cost. |
 
-The integration layer is provider-agnostic by design: swapping the WhatsApp provider
-requires only changing the outbound HTTP call in the edge function, not the event model.
+Each provider has its own edge function with different webhook formats and validation:
+
+| | Meta Cloud API | Twilio |
+|---|---|---|
+| Endpoint | `webhooks-whatsapp-meta` | `webhooks-whatsapp-twilio` |
+| Webhook format | JSON | Form-encoded |
+| Verification | `X-Hub-Signature-256` + GET challenge | `X-Twilio-Signature` |
+| provider value | `whatsapp_meta` | `whatsapp_twilio` |
+
+Both functions write to the same `webhook_events` and `messages` tables.
+The `provider` field distinguishes the source. No schema changes are needed to add either provider.
 
 ## Consequences
 
@@ -51,13 +58,16 @@ requires only changing the outbound HTTP call in the edge function, not the even
 
 - Stripe + MercadoPago covers the vast majority of payment scenarios for LATAM-focused
   freelance and startup clients.
-- Twilio reduces WhatsApp integration time from weeks (Meta approval + infra) to hours.
-- The provider-agnostic architecture means adding PayPal or a direct Meta integration
-  is additive — no structural changes required.
+- Implementing both Meta and Twilio demonstrates the provider-agnostic architecture in
+  practice, not just in theory — two different webhook formats, same data model.
+- The system can serve clients at different stages of Meta Business approval without
+  architectural changes.
 
 **Accepted tradeoffs:**
 
-- Twilio adds a per-message cost and an intermediary dependency. Acceptable at this
-  stage; migrating to direct Meta API is documented as a future path.
+- Two edge functions to maintain instead of one. Acceptable: the shared data model means
+  business logic changes apply once regardless of provider.
 - MercadoPago's API has regional inconsistencies. These are handled per-integration
   and documented in the relevant edge function.
+- Meta Cloud API requires a verified Meta Business account for production use. Local
+  development uses webhook simulation via Postman.

@@ -248,6 +248,127 @@
           ]
         }
       ]
+    },
+    {
+      "name": "WhatsApp Webhooks",
+      "description": "Simulate inbound WhatsApp messages from each provider.\n\nThese requests replicate what Twilio and Meta send to the webhook endpoints. Signature validation is bypassed locally via `--no-verify-jwt` — in production, the provider signature headers are required.",
+      "item": [
+        {
+          "name": "Twilio — Simulate inbound message",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/webhooks-whatsapp-twilio",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              },
+              {
+                "key": "X-Twilio-Signature",
+                "value": "local-bypass",
+                "description": "In production this must be a valid HMAC-SHA1 signature computed by Twilio."
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "From", "value": "whatsapp:+521234567890" },
+                { "key": "To", "value": "whatsapp:+14155238886" },
+                { "key": "Body", "value": "Hello from Twilio sandbox!" },
+                { "key": "MessageSid", "value": "SM00000000000000000000000000000001" },
+                { "key": "NumMedia", "value": "0" }
+              ]
+            },
+            "description": "Simulates a Twilio inbound WhatsApp message.\n\nLocally, signature validation will fail unless `TWILIO_AUTH_TOKEN` is empty or the function is deployed with `--no-verify-jwt`. For a full end-to-end test, use the Twilio sandbox and point the webhook URL to a tunnel (e.g. ngrok)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Webhook accepted', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
+                  "  if (pm.response.code === 401) {",
+                  "    console.warn('Signature validation active — set TWILIO_AUTH_TOKEN in .env or use a real Twilio request.');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Meta — Verify webhook (GET challenge)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/webhooks-whatsapp-meta?hub.mode=subscribe&hub.verify_token=local_verify_token&hub.challenge=challenge_abc123",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "webhooks-whatsapp-meta"],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.verify_token", "value": "local_verify_token", "description": "Must match META_VERIFY_TOKEN in .env" },
+                { "key": "hub.challenge", "value": "challenge_abc123" }
+              ]
+            },
+            "description": "Simulates the one-time GET request Meta sends to verify the webhook URL.\n\nIf `hub.verify_token` matches `META_VERIFY_TOKEN` in your `.env`, the response body will be the `hub.challenge` value."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Challenge returned', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.text()).to.equal('challenge_abc123');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Meta — Simulate inbound message",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/webhooks-whatsapp-meta",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "sha256=local-bypass",
+                "description": "In production this must be a valid HMAC-SHA256 signature computed by Meta."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [\n    {\n      \"changes\": [\n        {\n          \"value\": {\n            \"messages\": [\n              {\n                \"from\": \"521234567890\",\n                \"id\": \"wamid.00000000000000000000000000000001\",\n                \"type\": \"text\",\n                \"text\": {\n                  \"body\": \"Hello from Meta!\"\n                }\n              }\n            ],\n            \"metadata\": {\n              \"phone_number_id\": \"123456789\"\n            }\n          }\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "description": "Simulates a Meta Cloud API inbound WhatsApp message.\n\nLocally, signature validation will fail unless `META_APP_SECRET` is empty. For a full end-to-end test, point the Meta webhook URL to a tunnel (e.g. ngrok) with a verified Meta App."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Webhook accepted', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
+                  "  if (pm.response.code === 401) {",
+                  "    console.warn('Signature validation active — set META_APP_SECRET in .env or use a real Meta request.');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ]
 }

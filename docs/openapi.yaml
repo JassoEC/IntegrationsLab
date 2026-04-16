@@ -138,6 +138,91 @@ components:
           type: string
           example: Invalid login credentials
 
+    WebhookEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        provider:
+          type: string
+          example: whatsapp_twilio
+        event_type:
+          type: string
+          example: message.received
+        payload:
+          type: object
+        status:
+          type: string
+          enum: [pending, processed, failed]
+        created_at:
+          type: string
+          format: date-time
+
+    TwilioWebhookPayload:
+      type: object
+      description: Form-encoded fields sent by Twilio on an inbound WhatsApp message.
+      properties:
+        From:
+          type: string
+          example: "whatsapp:+521234567890"
+        To:
+          type: string
+          example: "whatsapp:+14155238886"
+        Body:
+          type: string
+          example: "Hello!"
+        MessageSid:
+          type: string
+          example: "SMxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        MediaUrl0:
+          type: string
+          description: Present only if the message includes media.
+
+    MetaWebhookPayload:
+      type: object
+      description: JSON payload sent by Meta Cloud API on an inbound WhatsApp message.
+      properties:
+        object:
+          type: string
+          example: whatsapp_business_account
+        entry:
+          type: array
+          items:
+            type: object
+            properties:
+              changes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    value:
+                      type: object
+                      properties:
+                        messages:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              from:
+                                type: string
+                                example: "521234567890"
+                              id:
+                                type: string
+                              type:
+                                type: string
+                                example: text
+                              text:
+                                type: object
+                                properties:
+                                  body:
+                                    type: string
+                        metadata:
+                          type: object
+                          properties:
+                            phone_number_id:
+                              type: string
+
 tags:
   - name: Auth
     description: |
@@ -146,6 +231,22 @@ tags:
 
       These endpoints are consumed identically by any client layer
       (Postman, Next.js, React Native) — the headless API contract does not change.
+
+  - name: WhatsApp Webhooks
+    description: |
+      Inbound webhook endpoints for WhatsApp messages.
+
+      Two providers are supported — each has its own endpoint, signature
+      validation method, and payload format, but both write to the same
+      `webhook_events` and `messages` tables.
+
+      | Provider | Endpoint | Signature header | Format |
+      |---|---|---|---|
+      | Twilio | `/functions/v1/webhooks-whatsapp-twilio` | `X-Twilio-Signature` | Form-encoded |
+      | Meta Cloud API | `/functions/v1/webhooks-whatsapp-meta` | `X-Hub-Signature-256` | JSON |
+
+      Webhooks are public endpoints (no Bearer token required) — the provider
+      signature is the authentication mechanism.
 
 paths:
   /auth/v1/signup:
@@ -283,3 +384,116 @@ paths:
           description: Successfully signed out. No response body.
         '401':
           description: Invalid or already expired token.
+
+  /functions/v1/webhooks-whatsapp-twilio:
+    post:
+      tags: [WhatsApp Webhooks]
+      summary: Receive inbound WhatsApp message (Twilio)
+      description: |
+        Called by Twilio when a WhatsApp message is received on the configured number.
+
+        **Signature validation:** Twilio signs every request with HMAC-SHA1 over the
+        full webhook URL + sorted POST parameters. The signature is sent in the
+        `X-Twilio-Signature` header. Requests with an invalid signature return `401`.
+
+        **Processing flow:**
+        1. Validate `X-Twilio-Signature`
+        2. Persist raw payload to `webhook_events`
+        3. Store message to `messages`
+        4. Mark event as `processed`
+        5. Return `200` (empty body)
+
+        Twilio retries the webhook if it does not receive a `2xx` within 15 seconds.
+      parameters:
+        - in: header
+          name: X-Twilio-Signature
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA1 signature computed by Twilio.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TwilioWebhookPayload'
+      responses:
+        '200':
+          description: Event received and stored. Empty body.
+        '401':
+          description: Invalid Twilio signature.
+        '415':
+          description: Content-Type must be application/x-www-form-urlencoded.
+        '500':
+          description: Failed to persist event or message.
+
+  /functions/v1/webhooks-whatsapp-meta:
+    get:
+      tags: [WhatsApp Webhooks]
+      summary: Verify webhook endpoint (Meta)
+      description: |
+        Meta sends a one-time `GET` request to verify the webhook URL during setup.
+
+        The endpoint must respond with the `hub.challenge` value if the
+        `hub.verify_token` matches `META_VERIFY_TOKEN`.
+      parameters:
+        - in: query
+          name: hub.mode
+          schema:
+            type: string
+            example: subscribe
+        - in: query
+          name: hub.verify_token
+          schema:
+            type: string
+        - in: query
+          name: hub.challenge
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Token matched. Returns the challenge string.
+        '403':
+          description: Token mismatch.
+    post:
+      tags: [WhatsApp Webhooks]
+      summary: Receive inbound WhatsApp message (Meta Cloud API)
+      description: |
+        Called by Meta when a WhatsApp message is received on the configured
+        phone number.
+
+        **Signature validation:** Meta signs the raw request body with HMAC-SHA256
+        using the app secret. The signature is sent in `X-Hub-Signature-256` as
+        `sha256=<hex>`. Requests with an invalid signature return `401`.
+
+        **Processing flow:**
+        1. Validate `X-Hub-Signature-256`
+        2. Persist raw payload to `webhook_events`
+        3. Store message to `messages`
+        4. Mark event as `processed`
+        5. Return `200` (empty body)
+
+        Meta retries the webhook if it does not receive a `200` within 20 seconds.
+
+        Non-message notifications (delivery receipts, read receipts) are acknowledged
+        with `200` but not stored as messages.
+      parameters:
+        - in: header
+          name: X-Hub-Signature-256
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature computed by Meta. Format — `sha256:<hex>`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MetaWebhookPayload'
+      responses:
+        '200':
+          description: Event received and stored. Empty body.
+        '401':
+          description: Invalid Meta signature.
+        '500':
+          description: Failed to persist event or message.

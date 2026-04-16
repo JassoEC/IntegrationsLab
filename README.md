@@ -80,13 +80,18 @@ Definir un dominio neutral para integraciones.
 ``` sql
 messages
 --------
-id
-provider
-from_number
-to_number
-message
-status
-created_at
+id           uuid, primary key
+provider     text              -- 'whatsapp'
+direction    text              -- 'inbound' | 'outbound'
+from_number  text
+to_number    text
+body         text
+media_url    text              -- attachments (images, audio, documents)
+external_id  text              -- provider message ID (e.g. Twilio MessageSid)
+status       text              -- queued | sent | delivered | received | failed
+error        text              -- failure reason if status = 'failed'
+created_at   timestamptz
+updated_at   timestamptz
 ```
 
 ### payments
@@ -94,13 +99,17 @@ created_at
 ``` sql
 payments
 --------
-id
-provider
-amount
-currency
-status
-external_id
-created_at
+id           uuid, primary key
+provider     text              -- 'stripe' | 'mercadopago' | 'paypal'
+amount       numeric(12,2)
+currency     text              -- ISO 4217 (USD, MXN, ARS, BRL...)
+status       text              -- pending | processing | succeeded | failed | refunded
+external_id  text              -- provider payment ID
+payment_url  text              -- checkout URL sent to the customer
+metadata     jsonb             -- provider-specific fields
+error        text              -- failure reason if status = 'failed'
+created_at   timestamptz
+updated_at   timestamptz
 ```
 
 ### webhook_events
@@ -108,11 +117,14 @@ created_at
 ``` sql
 webhook_events
 --------------
-id
-provider
-event_type
-payload
-created_at
+id            uuid, primary key
+provider      text              -- 'whatsapp' | 'stripe' | 'mercadopago'
+event_type    text              -- e.g. 'payment.succeeded', 'message.received'
+payload       jsonb             -- full raw payload, unmodified
+status        text              -- pending | processed | failed
+error         text              -- processing error if status = 'failed'
+processed_at  timestamptz
+created_at    timestamptz
 ```
 
 Esta tabla permite:
@@ -127,44 +139,35 @@ Esta tabla permite:
 
 Primer proveedor porque valida la arquitectura de eventos.
 
-Endpoint:
+Se implementan dos proveedores para cubrir el espectro completo de escenarios:
 
-    /webhooks/whatsapp
+    Provider         Endpoint                       Caso de uso
+    ---------------- ------------------------------ ----------------------------------
+    Meta Cloud API   webhooks-whatsapp-meta         Clientes con Meta Business approval
+    Twilio           webhooks-whatsapp-twilio       Clientes sin approval / managed
 
-Flujo:
+Flujo (igual para ambos proveedores):
 
-    WhatsApp
+    WhatsApp provider
        │
-       │ webhook
+       │ POST webhook
        ▼
     edge function
        │
-       ├ guardar evento
-       ├ guardar mensaje
-       └ responder
+       ├─ 1. validate signature
+       ├─ 2. store raw event  →  webhook_events (status: pending)
+       ├─ 3. store message    →  messages
+       ├─ 4. mark processed   →  webhook_events (status: processed)
+       └─ 5. return 200
 
-Ejemplo simplificado:
+Diferencias por proveedor:
 
-``` ts
-export async function handler(req: Request) {
-
-  const payload = await req.json()
-
-  // guardar webhook
-  await db.insert("webhook_events", {
-     provider: "whatsapp",
-     payload
-  })
-
-  // guardar mensaje
-  await db.insert("messages", {
-     provider: "whatsapp",
-     message: payload.text
-  })
-
-  return new Response("ok")
-}
-```
+    Meta Cloud API                    Twilio
+    --------------------------------- ---------------------------------
+    JSON body                         Form-encoded body
+    X-Hub-Signature-256 validation    X-Twilio-Signature validation
+    GET challenge on setup            No challenge required
+    provider = 'whatsapp_meta'        provider = 'whatsapp_twilio'
 
 ------------------------------------------------------------------------
 
