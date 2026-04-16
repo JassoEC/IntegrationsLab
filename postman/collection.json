@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "Integration Sandbox",
+    "name": "Automated Notification & Payment System",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Integration Sandbox API — headless auth and integrations via Supabase."
+    "description": "API for automating payment processing and customer notifications across WhatsApp, Stripe, and MercadoPago.\n\nThis collection covers the full API surface — no frontend needed. The same endpoints are consumed by the web dashboard (Next.js) and mobile app (React Native/Expo) in future layers.\n\n## Setup\n\n1. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` in the collection variables\n2. Run **Auth > Login** — `ACCESS_TOKEN` and `REFRESH_TOKEN` are saved automatically\n3. All protected requests pick up `ACCESS_TOKEN` from the variable"
   },
   "variable": [
     {
@@ -29,7 +29,7 @@
   "item": [
     {
       "name": "Auth",
-      "description": "Headless authentication via Supabase Auth (`/auth/v1`).",
+      "description": "Headless authentication via Supabase Auth (`/auth/v1`).\n\nNo frontend required. This same auth flow is used by Postman, the Next.js dashboard, and the React Native app — the API contract is identical across all client layers.",
       "item": [
         {
           "name": "Register",

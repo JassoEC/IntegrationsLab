@@ -1,21 +1,48 @@
 openapi: 3.0.0
 
 info:
-  title: Integration Sandbox
+  title: Automated Notification & Payment System
   version: 1.0.0
   description: |
-    Integration Sandbox API built on Supabase Edge Functions.
+    API for automating payment processing and customer notifications
+    across WhatsApp, Stripe, and MercadoPago — built on Supabase Edge Functions.
+
+    ## What this solves
+
+    Businesses need to confirm payments and reach customers instantly.
+    This API connects payment events to WhatsApp notifications automatically:
+
+    ```
+    Customer pays (Stripe / MercadoPago)
+         │
+         ▼
+    Payment confirmed
+         │
+         ▼
+    WhatsApp message sent to customer
+    ```
+
+    No manual follow-up. No delayed confirmations. Every payment event
+    is logged, auditable, and replayable.
+
+    ## System layers
+
+    | Layer | Status | Description |
+    |---|---|---|
+    | **API (this spec)** | current | Headless. Consumed by any client. |
+    | Web dashboard | planned | Next.js |
+    | Mobile app | planned | React Native / Expo |
 
     ## Authentication
 
-    This system uses **Supabase Auth** in a headless manner.
-    There is no frontend — the full auth flow happens via API.
+    This API uses **Supabase Auth** in a headless manner — no frontend required.
+    Any HTTP client (Postman, mobile app, web app) uses the same flow.
 
-    ### Basic flow
+    ### Flow
 
     1. Register with `POST /auth/v1/signup`
     2. Sign in with `POST /auth/v1/token?grant_type=password`
-    3. Use the returned `access_token` as a `Bearer` token on protected endpoints
+    3. Use the returned `access_token` as `Bearer` token on protected endpoints
     4. Renew the token with `POST /auth/v1/token?grant_type=refresh_token`
 
     ### Required headers on all requests
@@ -116,6 +143,9 @@ tags:
     description: |
       Authentication endpoints provided by Supabase Auth.
       Base path: `/auth/v1`
+
+      These endpoints are consumed identically by any client layer
+      (Postman, Next.js, React Native) — the headless API contract does not change.
 
 paths:
   /auth/v1/signup:
