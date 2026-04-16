@@ -1,0 +1,255 @@
+openapi: 3.0.0
+
+info:
+  title: Integration Sandbox
+  version: 1.0.0
+  description: |
+    Integration Sandbox API built on Supabase Edge Functions.
+
+    ## Authentication
+
+    This system uses **Supabase Auth** in a headless manner.
+    There is no frontend — the full auth flow happens via API.
+
+    ### Basic flow
+
+    1. Register with `POST /auth/v1/signup`
+    2. Sign in with `POST /auth/v1/token?grant_type=password`
+    3. Use the returned `access_token` as a `Bearer` token on protected endpoints
+    4. Renew the token with `POST /auth/v1/token?grant_type=refresh_token`
+
+    ### Required headers on all requests
+
+    - `apikey`: the public anon key of the Supabase project
+    - `Authorization: Bearer <access_token>` (only on protected endpoints)
+
+servers:
+  - url: https://{project_ref}.supabase.co
+    description: Supabase project
+    variables:
+      project_ref:
+        description: Supabase project ID (e.g. abcdefghijklmnop)
+        default: your-project-ref
+
+components:
+  securitySchemes:
+    AnonKey:
+      type: apiKey
+      in: header
+      name: apikey
+      description: Public anon key of the Supabase project. Required on every request.
+
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT obtained from the login endpoint (`/auth/v1/token`).
+        Passed as `Authorization: Bearer <access_token>`.
+
+  schemas:
+    AuthCredentials:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          example: supersecret123
+
+    AuthSession:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access token. Valid for 1 hour by default.
+        token_type:
+          type: string
+          example: bearer
+        expires_in:
+          type: integer
+          description: Seconds until the access_token expires.
+          example: 3600
+        refresh_token:
+          type: string
+          description: Long-lived token used to renew the access_token.
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          example: authenticated
+        created_at:
+          type: string
+          format: date-time
+        last_sign_in_at:
+          type: string
+          format: date-time
+
+    AuthError:
+      type: object
+      properties:
+        error:
+          type: string
+          example: invalid_grant
+        error_description:
+          type: string
+          example: Invalid login credentials
+
+tags:
+  - name: Auth
+    description: |
+      Authentication endpoints provided by Supabase Auth.
+      Base path: `/auth/v1`
+
+paths:
+  /auth/v1/signup:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: |
+        Creates a new user with email and password.
+
+        If the project has **email confirmation enabled**, the user will receive
+        a verification email and `session` will be `null` until confirmed.
+
+        If disabled, an active session is returned immediately.
+      security:
+        - AnonKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthCredentials'
+            example:
+              email: user@example.com
+              password: supersecret123
+      responses:
+        '200':
+          description: User created. Session included if email confirmation is disabled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: Email already registered or validation error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthError'
+
+  /auth/v1/token:
+    post:
+      tags: [Auth]
+      summary: Sign in / Refresh token
+      description: |
+        Polymorphic endpoint controlled by `grant_type`:
+
+        - `password` — sign in with email and password. Returns `access_token` and `refresh_token`.
+        - `refresh_token` — renew the `access_token` using a valid `refresh_token`.
+
+        The `access_token` is a JWT valid for 1 hour (configurable in the Supabase project).
+        The `refresh_token` does not expire unless revoked or rotated.
+      security:
+        - AnonKey: []
+      parameters:
+        - in: query
+          name: grant_type
+          required: true
+          schema:
+            type: string
+            enum: [password, refresh_token]
+          description: Authentication grant type.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - title: Sign in with password
+                  $ref: '#/components/schemas/AuthCredentials'
+                - title: Refresh token
+                  type: object
+                  required: [refresh_token]
+                  properties:
+                    refresh_token:
+                      type: string
+            examples:
+              password:
+                summary: Sign in with email and password
+                value:
+                  email: user@example.com
+                  password: supersecret123
+              refresh:
+                summary: Renew access token
+                value:
+                  refresh_token: your-refresh-token-here
+      responses:
+        '200':
+          description: Active session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '400':
+          description: Invalid credentials or expired refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthError'
+
+  /auth/v1/user:
+    get:
+      tags: [Auth]
+      summary: Get authenticated user
+      description: |
+        Returns the user associated with the active `access_token`.
+        Useful to verify the token is valid and retrieve the `user.id`.
+      security:
+        - AnonKey: []
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Authenticated user data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid or expired token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthError'
+
+  /auth/v1/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out
+      description: |
+        Invalidates the current `access_token` and `refresh_token`.
+        After this request, both tokens are revoked server-side.
+      security:
+        - AnonKey: []
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Successfully signed out. No response body.
+        '401':
+          description: Invalid or already expired token.

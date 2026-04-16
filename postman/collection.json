@@ -1,0 +1,253 @@
+{
+  "info": {
+    "name": "Integration Sandbox",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Integration Sandbox API — headless auth and integrations via Supabase."
+  },
+  "variable": [
+    {
+      "key": "SUPABASE_URL",
+      "value": "https://your-project-ref.supabase.co",
+      "description": "Base URL of your Supabase project."
+    },
+    {
+      "key": "SUPABASE_ANON_KEY",
+      "value": "",
+      "description": "Public anon key from Supabase project settings > API."
+    },
+    {
+      "key": "ACCESS_TOKEN",
+      "value": "",
+      "description": "Set automatically after a successful login."
+    },
+    {
+      "key": "REFRESH_TOKEN",
+      "value": "",
+      "description": "Set automatically after a successful login."
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Headless authentication via Supabase Auth (`/auth/v1`).",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/auth/v1/signup",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"supersecret123\"\n}"
+            },
+            "description": "Creates a new user.\n\nIf email confirmation is disabled in your Supabase project, the response includes an active session immediately. Otherwise, `session` will be `null` until the user confirms their email."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "",
+                  "if (res.access_token) {",
+                  "  pm.collectionVariables.set('ACCESS_TOKEN', res.access_token);",
+                  "  pm.collectionVariables.set('REFRESH_TOKEN', res.refresh_token);",
+                  "  console.log('Tokens saved from signup response.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{SUPABASE_URL}}/auth/v1/token?grant_type=password",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["auth", "v1", "token"],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"supersecret123\"\n}"
+            },
+            "description": "Signs in with email and password.\n\nThe `ACCESS_TOKEN` and `REFRESH_TOKEN` collection variables are set automatically by the test script."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Login successful', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(res.access_token).to.be.a('string');",
+                  "});",
+                  "",
+                  "if (res.access_token) {",
+                  "  pm.collectionVariables.set('ACCESS_TOKEN', res.access_token);",
+                  "  pm.collectionVariables.set('REFRESH_TOKEN', res.refresh_token);",
+                  "  console.log('ACCESS_TOKEN and REFRESH_TOKEN saved.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{SUPABASE_URL}}/auth/v1/token?grant_type=refresh_token",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["auth", "v1", "token"],
+              "query": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{REFRESH_TOKEN}}\"\n}"
+            },
+            "description": "Renews the `access_token` using the `refresh_token`.\n\nSupabase uses rotating refresh tokens — each use issues a new `refresh_token`. The test script updates both collection variables automatically."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "",
+                  "pm.test('Token refreshed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(res.access_token).to.be.a('string');",
+                  "});",
+                  "",
+                  "if (res.access_token) {",
+                  "  pm.collectionVariables.set('ACCESS_TOKEN', res.access_token);",
+                  "  pm.collectionVariables.set('REFRESH_TOKEN', res.refresh_token);",
+                  "  console.log('Tokens rotated and saved.');",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "method": "GET",
+            "url": "{{SUPABASE_URL}}/auth/v1/user",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ACCESS_TOKEN}}"
+              }
+            ],
+            "description": "Returns the authenticated user's data.\n\nUseful to verify the `ACCESS_TOKEN` is valid and to retrieve the `user.id`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Got user data', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.id).to.be.a('string');",
+                  "  console.log('Authenticated as:', res.email);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/auth/v1/logout",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{SUPABASE_ANON_KEY}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{ACCESS_TOKEN}}"
+              }
+            ],
+            "description": "Signs out the current user. Both `access_token` and `refresh_token` are revoked server-side.\n\nReturns `204 No Content` on success."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Signed out', () => {",
+                  "  pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('ACCESS_TOKEN', '');",
+                  "pm.collectionVariables.set('REFRESH_TOKEN', '');",
+                  "console.log('Tokens cleared.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
