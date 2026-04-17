@@ -1,3 +1,35 @@
+export async function sendMetaMessage(
+  accessToken: string,
+  phoneNumberId: string,
+  to: string,
+  body: string,
+): Promise<string> {
+  const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "text",
+      text: { body },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Meta API error ${res.status}: ${err}`);
+  }
+
+  const json = await res.json();
+  return (json.messages?.[0]?.id ?? "") as string;
+}
+
 /**
  * Validates that an incoming request genuinely came from Meta.
  *

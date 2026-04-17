@@ -1,3 +1,30 @@
+export async function sendTwilioMessage(
+  accountSid: string,
+  authToken: string,
+  from: string,
+  to: string,
+  body: string,
+): Promise<string> {
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+    },
+    body: new URLSearchParams({ From: from, To: to, Body: body }).toString(),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Twilio API error ${res.status}: ${err}`);
+  }
+
+  const json = await res.json();
+  return json.sid as string;
+}
+
 /**
  * Validates that an incoming request genuinely came from Twilio.
  *

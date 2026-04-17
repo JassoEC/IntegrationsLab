@@ -146,7 +146,33 @@ Se implementan dos proveedores para cubrir el espectro completo de escenarios:
     Meta Cloud API   webhooks-whatsapp-meta         Clientes con Meta Business approval
     Twilio           webhooks-whatsapp-twilio       Clientes sin approval / managed
 
-Flujo (igual para ambos proveedores):
+## Arquitectura del módulo WhatsApp
+
+El módulo se divide en cuatro capas:
+
+    whatsapp-gateway
+       │
+       ├─ outbound messaging   →  messages-send
+       ├─ inbound webhook      →  webhooks-whatsapp-twilio / webhooks-whatsapp-meta
+       └─ webhook validation   →  _shared/twilio.ts / _shared/meta.ts
+
+    conversation-service
+       │
+       ├─ contacts             →  tabla contacts (upsert por phone_number)
+       ├─ conversations        →  tabla conversations (una abierta por contacto)
+       └─ messages             →  tabla messages (con conversation_id + contact_id)
+
+    automation-engine
+       │
+       └─ trigger responses    →  _shared/automation.ts (keyword-based auto-reply)
+
+    api layer
+       │
+       ├─ send message         →  POST /messages-send
+       ├─ conversations        →  GET  /conversations-list
+       └─ messages             →  GET  /conversations-get/:id  (con mensajes embebidos)
+
+## Flujo inbound completo
 
     WhatsApp provider
        │
@@ -154,13 +180,27 @@ Flujo (igual para ambos proveedores):
        ▼
     edge function
        │
-       ├─ 1. validate signature
-       ├─ 2. store raw event  →  webhook_events (status: pending)
-       ├─ 3. store message    →  messages
-       ├─ 4. mark processed   →  webhook_events (status: processed)
-       └─ 5. return 200
+       ├─ 1. validate signature        (HMAC-SHA1 Twilio / HMAC-SHA256 Meta)
+       ├─ 2. store raw event       →   webhook_events (status: pending)
+       ├─ 3. store message         →   messages (direction: inbound)
+       ├─ 4. upsert contact        →   contacts (by phone_number)
+       ├─ 5. upsert conversation   →   conversations (open, one per contact)
+       ├─ 6. attach message        →   messages.conversation_id + last_message_at
+       ├─ 7. auto-reply (optional) →   keyword match → send + store outbound message
+       └─ 8. mark processed        →   webhook_events (status: processed)
 
-Diferencias por proveedor:
+## Flujo outbound (POST /messages-send)
+
+    {to, body, provider}
+       │
+       ▼
+    call provider API  (Twilio Messages API / Meta Graph API v19.0)
+       │
+       ├─ upsert contact + conversation
+       ├─ store outbound message  →  messages (direction: outbound)
+       └─ return {id, external_id, conversation_id, status}
+
+## Diferencias por proveedor
 
     Meta Cloud API                    Twilio
     --------------------------------- ---------------------------------
@@ -168,6 +208,33 @@ Diferencias por proveedor:
     X-Hub-Signature-256 validation    X-Twilio-Signature validation
     GET challenge on setup            No challenge required
     provider = 'whatsapp_meta'        provider = 'whatsapp_twilio'
+
+## Schema additions (migration 20260417224824)
+
+    contacts
+    --------
+    id           uuid pk
+    phone_number text unique          -- upsert key
+    display_name text
+    metadata     jsonb
+    created_at / updated_at
+
+    conversations
+    -------------
+    id              uuid pk
+    contact_id      uuid fk → contacts
+    channel         text default 'whatsapp'
+    status          text  -- open | closed | pending
+    last_message_at timestamptz
+    created_at / updated_at
+
+    messages (additions)
+    --------------------
+    conversation_id uuid fk → conversations
+    contact_id      uuid fk → contacts
+
+RLS enabled on all tables. Edge functions use service_role key — no
+client-facing auth required at this layer.
 
 ------------------------------------------------------------------------
 
@@ -320,12 +387,24 @@ Pipeline:
     │
     ├ supabase
     │  ├ migrations
+    │  │    ├ 20260416142654_create_base_tables.sql
+    │  │    └ 20260417224824_conversation_service.sql   ← contacts, conversations, RLS
+    │  │
     │  └ functions
-    │        ├ webhooks-whatsapp
-    │        ├ webhooks-stripe
-    │        ├ webhooks-mercadopago
-    │        ├ payments-create
-    │        └ messages-send
+    │       ├ _shared
+    │       │    ├ twilio.ts         ← validateTwilioSignature + sendTwilioMessage
+    │       │    ├ meta.ts           ← validateMetaSignature + sendMetaMessage
+    │       │    ├ conversation.ts   ← upsertContact, upsertConversation, attach
+    │       │    └ automation.ts     ← getAutoReply (keyword triggers)
+    │       │
+    │       ├ webhooks-whatsapp-twilio    ← inbound + threading + auto-reply
+    │       ├ webhooks-whatsapp-meta      ← inbound + threading + auto-reply
+    │       ├ webhooks-stripe
+    │       ├ webhooks-mercadopago
+    │       ├ messages-send               ← outbound (Twilio + Meta)
+    │       ├ conversations-list          ← GET list with contact info
+    │       ├ conversations-get           ← GET single with messages
+    │       └ payments-create
     │
     ├ docs
     │   openapi.yaml
