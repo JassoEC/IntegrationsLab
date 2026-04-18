@@ -138,6 +138,116 @@ components:
           type: string
           example: Invalid login credentials
 
+    Contact:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone_number:
+          type: string
+          example: "whatsapp:+521234567890"
+        display_name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum: [inbound, outbound]
+        provider:
+          type: string
+          example: whatsapp_twilio
+        body:
+          type: string
+        media_url:
+          type: string
+          nullable: true
+        status:
+          type: string
+          example: received
+        external_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          example: whatsapp
+        status:
+          type: string
+          enum: [open, closed, pending]
+        last_message_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        contacts:
+          $ref: '#/components/schemas/Contact'
+
+    ConversationWithMessages:
+      allOf:
+        - $ref: '#/components/schemas/Conversation'
+        - type: object
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: '#/components/schemas/Message'
+
+    SendMessageRequest:
+      type: object
+      required: [to, body]
+      properties:
+        to:
+          type: string
+          description: Recipient phone number in E.164 format with whatsapp prefix.
+          example: "whatsapp:+521234567890"
+        body:
+          type: string
+          description: Text content of the message.
+          example: "Your payment has been confirmed. Thank you!"
+        provider:
+          type: string
+          enum: [twilio, meta]
+          default: twilio
+          description: Provider to use for delivery. Defaults to `twilio`.
+
+    SendMessageResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal message record ID.
+        external_id:
+          type: string
+          description: Provider message ID (Twilio MessageSid or Meta message ID).
+        conversation_id:
+          type: string
+          format: uuid
+          description: Conversation this message was threaded into.
+        status:
+          type: string
+          example: sent
+
     WebhookEvent:
       type: object
       properties:
@@ -231,6 +341,13 @@ tags:
 
       These endpoints are consumed identically by any client layer
       (Postman, Next.js, React Native) — the headless API contract does not change.
+
+  - name: WhatsApp Messaging
+    description: |
+      Outbound messaging and conversation management.
+
+      All endpoints are public (no Bearer token required) — designed to be called
+      from internal services or trusted backend clients using the service role key.
 
   - name: WhatsApp Webhooks
     description: |
@@ -400,8 +517,11 @@ paths:
         1. Validate `X-Twilio-Signature`
         2. Persist raw payload to `webhook_events`
         3. Store message to `messages`
-        4. Mark event as `processed`
-        5. Return `200` (empty body)
+        4. Upsert contact + conversation (conversation-service)
+        5. Thread message into conversation
+        6. Auto-reply if message matches a keyword trigger (automation-engine)
+        7. Mark event as `processed`
+        8. Return `200` (empty body)
 
         Twilio retries the webhook if it does not receive a `2xx` within 15 seconds.
       parameters:
@@ -470,8 +590,11 @@ paths:
         1. Validate `X-Hub-Signature-256`
         2. Persist raw payload to `webhook_events`
         3. Store message to `messages`
-        4. Mark event as `processed`
-        5. Return `200` (empty body)
+        4. Upsert contact + conversation (conversation-service)
+        5. Thread message into conversation
+        6. Auto-reply if message matches a keyword trigger (automation-engine)
+        7. Mark event as `processed`
+        8. Return `200` (empty body)
 
         Meta retries the webhook if it does not receive a `200` within 20 seconds.
 
@@ -497,3 +620,131 @@ paths:
           description: Invalid Meta signature.
         '500':
           description: Failed to persist event or message.
+
+  /functions/v1/messages-send:
+    post:
+      tags: [WhatsApp Messaging]
+      summary: Send an outbound WhatsApp message
+      description: |
+        Sends a WhatsApp message to any phone number via the configured provider.
+
+        On success the message is stored in `messages`, the contact is upserted in
+        `contacts`, and the message is threaded into an open `conversation`.
+
+        **Providers:**
+        - `twilio` (default) — uses Twilio Messages API with Basic auth
+        - `meta` — uses Meta Graph API v19.0
+
+        Returns `502` if the provider API call fails (e.g. invalid credentials,
+        number not in sandbox).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessageRequest'
+            examples:
+              twilio:
+                summary: Send via Twilio
+                value:
+                  to: "whatsapp:+521234567890"
+                  body: "Your payment has been confirmed. Thank you!"
+                  provider: twilio
+              meta:
+                summary: Send via Meta Cloud API
+                value:
+                  to: "521234567890"
+                  body: "Your payment has been confirmed. Thank you!"
+                  provider: meta
+      responses:
+        '200':
+          description: Message sent and stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SendMessageResponse'
+        '400':
+          description: Unknown provider.
+        '422':
+          description: Missing required fields `to` or `body`.
+        '502':
+          description: Provider API call failed.
+
+  /functions/v1/conversations-list:
+    get:
+      tags: [WhatsApp Messaging]
+      summary: List conversations
+      description: |
+        Returns a paginated list of conversations ordered by most recent message.
+
+        Each conversation includes the associated contact's `phone_number` and
+        `display_name`.
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [open, closed, pending]
+            default: open
+          description: Filter by conversation status.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+          description: Number of results per page.
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset.
+      responses:
+        '200':
+          description: Paginated list of conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Conversation'
+                  count:
+                    type: integer
+                    description: Total number of conversations matching the filter.
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '500':
+          description: Database error.
+
+  /functions/v1/conversations-get/{id}:
+    get:
+      tags: [WhatsApp Messaging]
+      summary: Get conversation with messages
+      description: |
+        Returns a single conversation including the full message thread (up to 100
+        messages, ordered chronologically) and the associated contact.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Conversation ID.
+      responses:
+        '200':
+          description: Conversation with embedded messages and contact.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConversationWithMessages'
+        '404':
+          description: Conversation not found.
+        '500':
+          description: Database error.

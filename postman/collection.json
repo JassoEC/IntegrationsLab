@@ -24,6 +24,11 @@
       "key": "REFRESH_TOKEN",
       "value": "",
       "description": "Set automatically after a successful login."
+    },
+    {
+      "key": "CONVERSATION_ID",
+      "value": "",
+      "description": "Set automatically after Send Message. Used by Get Conversation."
     }
   ],
   "item": [
@@ -242,6 +247,108 @@
                   "pm.collectionVariables.set('ACCESS_TOKEN', '');",
                   "pm.collectionVariables.set('REFRESH_TOKEN', '');",
                   "console.log('Tokens cleared.');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "WhatsApp Messaging",
+      "description": "Outbound messaging and conversation management.\n\nUse these endpoints to send messages to customers and inspect conversation threads. No auth header required — designed for internal/backend use.",
+      "item": [
+        {
+          "name": "Send Message",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/messages-send",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"whatsapp:+521234567890\",\n  \"body\": \"Your payment has been confirmed. Thank you! 🎉\",\n  \"provider\": \"twilio\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "description": "Sends an outbound WhatsApp message via Twilio or Meta.\n\nOn success, the message is stored in `messages` and threaded into the contact's open conversation.\n\nReplace `to` with a number that has joined the Twilio sandbox (`whatsapp:+52...`)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Message sent', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.status).to.equal('sent');",
+                  "  pm.expect(res.conversation_id).to.be.a('string');",
+                  "  pm.collectionVariables.set('CONVERSATION_ID', res.conversation_id);",
+                  "  console.log('Conversation ID saved:', res.conversation_id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Conversations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{SUPABASE_URL}}/functions/v1/conversations-list?status=open&limit=20&offset=0",
+              "host": ["{{SUPABASE_URL}}"],
+              "path": ["functions", "v1", "conversations-list"],
+              "query": [
+                { "key": "status", "value": "open" },
+                { "key": "limit", "value": "20" },
+                { "key": "offset", "value": "0" }
+              ]
+            },
+            "description": "Returns open conversations ordered by most recent message.\n\nEach item includes the contact's phone number and display name."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Conversations listed', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.data).to.be.an('array');",
+                  "  console.log('Total conversations:', res.count);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Conversation",
+          "request": {
+            "method": "GET",
+            "url": "{{SUPABASE_URL}}/functions/v1/conversations-get/{{CONVERSATION_ID}}",
+            "description": "Returns a single conversation with its full message thread and contact info.\n\n`CONVERSATION_ID` is set automatically after running **Send Message**. You can also copy any ID from the List Conversations response."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Conversation retrieved', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.messages).to.be.an('array');",
+                  "  console.log('Messages in thread:', res.messages.length);",
+                  "});"
                 ]
               }
             }
