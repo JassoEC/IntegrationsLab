@@ -16,6 +16,9 @@ supabase/functions/*/node_modules/
 # Node
 node_modules/
 
+# Next.js build output
+.next/
+
 # Deno
 .deno/
 
