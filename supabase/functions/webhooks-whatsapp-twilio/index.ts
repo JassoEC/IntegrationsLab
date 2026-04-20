@@ -30,7 +30,7 @@ Deno.serve(async (req: Request) => {
   const url = Deno.env.get("TWILIO_WEBHOOK_URL") ?? "";
   const authToken = Deno.env.get("TWILIO_AUTH_TOKEN") ?? "";
 
-  if (!validateTwilioSignature(authToken, signature, url, payload)) {
+  if (!await validateTwilioSignature(authToken, signature, url, payload)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
