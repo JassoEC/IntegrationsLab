@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { maskPhone } from '@/lib/utils'
+import { useI18n } from '@/lib/i18n'
 
 type Message = {
   id: string
@@ -26,6 +27,7 @@ function formatTime(ts: string) {
 
 export default function ConversationPage() {
   const { id } = useParams<{ id: string }>()
+  const { t } = useI18n()
   const [conv, setConv] = useState<Conversation | null>(null)
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
@@ -39,8 +41,8 @@ export default function ConversationPage() {
 
   useEffect(() => {
     fetchConv()
-    const t = setInterval(fetchConv, 4000)
-    return () => clearInterval(t)
+    const ti = setInterval(fetchConv, 2000)
+    return () => clearInterval(ti)
   }, [id])
 
   useEffect(() => {
@@ -52,19 +54,35 @@ export default function ConversationPage() {
     const to = conv.contacts?.phone_number
     if (!to) return
 
+    const text = body.trim()
+    const tempId = `temp-${Date.now()}`
+
+    // Optimistic update: show message instantly before API confirms
+    setBody('')
     setSending(true)
     setError(null)
+    setConv((prev) => prev ? {
+      ...prev,
+      messages: [...prev.messages, {
+        id: tempId, direction: 'outbound', body: text,
+        status: 'sending', provider: 'twilio', created_at: new Date().toISOString(),
+      }],
+    } : prev)
 
     const res = await fetch('/api/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, body: body.trim(), provider: 'twilio' }),
+      body: JSON.stringify({ to, body: text, provider: 'twilio' }),
     })
 
     if (res.ok) {
-      setBody('')
-      await fetchConv()
+      await fetchConv() // reconcile temp message with real DB record
     } else {
+      // Roll back optimistic message on failure
+      setConv((prev) => prev ? {
+        ...prev,
+        messages: prev.messages.filter((m) => m.id !== tempId),
+      } : prev)
       const data = await res.json()
       setError(data?.error ?? 'Failed to send')
     }
@@ -82,7 +100,7 @@ export default function ConversationPage() {
   if (!conv) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-600 text-xs">
-        Loading…
+        {t.conversation.loading}
       </div>
     )
   }
@@ -124,7 +142,7 @@ export default function ConversationPage() {
           </div>
         ))}
         {conv.messages.length === 0 && (
-          <p className="text-gray-600 text-xs text-center mt-8">No messages yet</p>
+          <p className="text-gray-600 text-xs text-center mt-8">{t.conversation.empty}</p>
         )}
         <div ref={bottomRef} />
       </div>
@@ -135,7 +153,7 @@ export default function ConversationPage() {
         <div className="flex items-end gap-2">
           <textarea
             className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-100 placeholder-gray-500 resize-none focus:outline-none focus:border-gray-500 min-h-[40px] max-h-32"
-            placeholder="Type a message… (Enter to send)"
+            placeholder={t.conversation.placeholder}
             rows={1}
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -146,7 +164,7 @@ export default function ConversationPage() {
             disabled={sending || !body.trim()}
             className="h-10 px-4 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm rounded-xl transition-colors shrink-0"
           >
-            {sending ? '…' : 'Send'}
+            {sending ? t.conversation.sending : t.conversation.send}
           </button>
         </div>
       </div>

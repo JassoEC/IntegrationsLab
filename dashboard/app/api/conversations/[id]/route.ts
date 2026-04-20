@@ -1,5 +1,9 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+
+const NO_CACHE = { headers: { 'Cache-Control': 'no-store' } }
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const { data, error } = await supabase
@@ -12,8 +16,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     .eq('id', params.id)
     .single()
 
-  if (error?.code === 'PGRST116') return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error?.code === 'PGRST116') return NextResponse.json({ error: 'Not found' }, { status: 404, ...NO_CACHE })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500, ...NO_CACHE })
 
   const sorted = {
     ...data,
@@ -21,5 +25,5 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
   }
 
-  return NextResponse.json(sorted)
+  return NextResponse.json(sorted, NO_CACHE)
 }
