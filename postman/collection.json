@@ -29,6 +29,21 @@
       "key": "CONVERSATION_ID",
       "value": "",
       "description": "Set automatically after Send Message. Used by Get Conversation."
+    },
+    {
+      "key": "TWILIO_AUTH_TOKEN",
+      "value": "",
+      "description": "Twilio auth token — same value as TWILIO_AUTH_TOKEN in supabase/functions/.env. Used by the local simulation pre-request script to compute the HMAC-SHA1 signature."
+    },
+    {
+      "key": "TWILIO_WEBHOOK_URL",
+      "value": "",
+      "description": "Full webhook URL — same value as TWILIO_WEBHOOK_URL in supabase/functions/.env (e.g. https://xxxx.ngrok-free.app/functions/v1/webhooks-whatsapp-twilio). Must match exactly for signature validation to pass."
+    },
+    {
+      "key": "SIMULATE_FROM",
+      "value": "whatsapp:+521234567890",
+      "description": "Phone number used as the sender in local simulations. Use the number registered in the Twilio sandbox."
     }
   ],
   "item": [
@@ -430,6 +445,89 @@
                   "pm.test('Challenge returned', () => {",
                   "  pm.response.to.have.status(200);",
                   "  pm.expect(pm.response.text()).to.equal('challenge_abc123');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Twilio — Simulate inbound (local, no Twilio quota)",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/webhooks-whatsapp-twilio",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              },
+              {
+                "key": "X-Twilio-Signature",
+                "value": "{{_twilio_sig}}",
+                "description": "Computed by the pre-request script using HMAC-SHA1 over TWILIO_WEBHOOK_URL + sorted params."
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "From", "value": "{{_sim_from}}", "description": "Resolved from SIMULATE_FROM collection variable" },
+                { "key": "To", "value": "{{_sim_to}}" },
+                { "key": "Body", "value": "{{_sim_body}}", "description": "Random body that does not match any auto-reply trigger" },
+                { "key": "MessageSid", "value": "{{_sim_sid}}", "description": "Unique SID generated per run to avoid duplicate key errors" },
+                { "key": "NumMedia", "value": "0" }
+              ]
+            },
+            "description": "Simulates a Twilio inbound message directly against the local Supabase edge function — no real Twilio call, no quota spent.\n\nThe pre-request script computes the correct HMAC-SHA1 signature so the webhook passes validation. The message body is randomised per run so it never matches an auto-reply trigger (no outbound Twilio call either).\n\n**Before running:**\n1. Set `TWILIO_AUTH_TOKEN` in collection variables (same value as in `supabase/functions/.env`)\n2. Set `TWILIO_WEBHOOK_URL` to your current ngrok URL (same as in `.env`)\n3. Optionally change `SIMULATE_FROM` to the sandbox number you joined with\n4. Make sure the edge function is running locally (`supabase start`)"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ── Collect inputs ────────────────────────────────────────────────────",
+                  "const authToken  = pm.collectionVariables.get('TWILIO_AUTH_TOKEN');",
+                  "const webhookUrl = pm.collectionVariables.get('TWILIO_WEBHOOK_URL');",
+                  "const from       = pm.collectionVariables.get('SIMULATE_FROM') || 'whatsapp:+521234567890';",
+                  "const to         = 'whatsapp:+14155238886';",
+                  "",
+                  "if (!authToken)  { throw new Error('Set TWILIO_AUTH_TOKEN in collection variables'); }",
+                  "if (!webhookUrl) { throw new Error('Set TWILIO_WEBHOOK_URL in collection variables'); }",
+                  "",
+                  "// ── Build unique, non-triggering body ────────────────────────────────",
+                  "// Prefix 'local-test-' ensures it matches no auto-reply pattern.",
+                  "const body = 'local-test-' + Date.now();",
+                  "const sid  = 'SMtest' + Date.now();",
+                  "",
+                  "// ── Expose to request body via request-scoped variables ───────────────",
+                  "pm.variables.set('_sim_from', from);",
+                  "pm.variables.set('_sim_to',   to);",
+                  "pm.variables.set('_sim_body', body);",
+                  "pm.variables.set('_sim_sid',  sid);",
+                  "",
+                  "// ── Compute Twilio HMAC-SHA1 signature ───────────────────────────────",
+                  "// Algorithm: webhookUrl + alphabetically sorted param name+value pairs.",
+                  "const params = { Body: body, From: from, MessageSid: sid, NumMedia: '0', To: to };",
+                  "let sigStr = webhookUrl;",
+                  "Object.keys(params).sort().forEach(k => { sigStr += k + params[k]; });",
+                  "",
+                  "const hash = CryptoJS.HmacSHA1(sigStr, authToken);",
+                  "pm.variables.set('_twilio_sig', CryptoJS.enc.Base64.stringify(hash));",
+                  "",
+                  "console.log('Signature computed for URL:', webhookUrl);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Webhook accepted (200 = processed, 401 = wrong token/url)', () => {",
+                  "  if (pm.response.code === 401) {",
+                  "    console.error('Signature mismatch — verify TWILIO_AUTH_TOKEN and TWILIO_WEBHOOK_URL match supabase/functions/.env exactly.');",
+                  "  }",
+                  "  pm.response.to.have.status(200);",
                   "});"
                 ]
               }
