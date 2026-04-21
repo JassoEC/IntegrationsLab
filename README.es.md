@@ -12,7 +12,7 @@ Contenido del proyecto:
 - **Mensajería WhatsApp** vía Twilio y Meta Cloud API
 - **Pipeline de webhooks** con validación de firma, registro de eventos y auto-respuesta
 - **Panel de operador** (Next.js) con hilos de conversación en tiempo real
-- **Documentación OpenAPI** (ReDoc)
+- **Documentación OpenAPI** — [jassoec.github.io/IntegrationsLab](https://jassoec.github.io/IntegrationsLab/)
 - **Colección Postman** para pruebas end-to-end sin consumir cuota del proveedor
 
 ---
@@ -263,7 +263,7 @@ paths:
       summary: Webhook WhatsApp
 ```
 
-Publicado vía ReDoc (HTML estático en `docs/index.html`, alojado en GitHub Pages).
+Publicado vía ReDoc: **[jassoec.github.io/IntegrationsLab](https://jassoec.github.io/IntegrationsLab/)**
 
 ---
 
