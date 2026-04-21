@@ -7,7 +7,18 @@
 Sandbox para construir y probar integraciones reales con APIs externas
 sobre un backend **serverless en Supabase**.
 
-Contenido del proyecto:
+**[Ver demo](https://www.youtube.com/watch?v=D1XIvs3ZUCQ)** · **[Docs API](https://jassoec.github.io/IntegrationsLab/)** · **[Colección Postman](https://www.postman.com/winter-station-87990/integrationslab/collection/53mm3kc/automated-notification-payment-system)** · **[Código fuente](https://github.com/JassoEC/IntegrationsLab)**
+
+## Cómo funciona
+
+1. El usuario envía un mensaje desde WhatsApp
+2. El backend recibe el webhook de Twilio
+3. El mensaje se procesa y almacena
+4. Se dispara una respuesta automática
+5. El operador responde desde el panel de administración
+6. La respuesta llega de vuelta al usuario en WhatsApp
+
+## Contenido del proyecto
 
 - **Mensajería WhatsApp** vía Twilio y Meta Cloud API
 - **Pipeline de webhooks** con validación de firma, registro de eventos y auto-respuesta
