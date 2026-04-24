@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+export const dynamic = 'force-dynamic'
+
+const NO_CACHE = { headers: { 'Cache-Control': 'no-store' } }
+
 export async function GET() {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -41,5 +45,5 @@ export async function GET() {
     openConversations: openConversations ?? 0,
     messagesToday: messagesToday ?? 0,
     pendingReply,
-  })
+  }, NO_CACHE)
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { maskPhone } from '@/lib/utils'
 import { useI18n } from '@/lib/i18n'
 
@@ -27,6 +27,7 @@ function formatTime(ts: string) {
 
 export default function ConversationPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
   const { t } = useI18n()
   const [conv, setConv] = useState<Conversation | null>(null)
   const [body, setBody] = useState('')
@@ -37,6 +38,7 @@ export default function ConversationPage() {
   const fetchConv = async () => {
     const res = await fetch(`/api/conversations/${id}`)
     if (res.ok) setConv(await res.json())
+    else router.replace('/')
   }
 
   useEffect(() => {

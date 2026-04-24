@@ -1,19 +1,34 @@
-# Integration Sandbox -- Arquitectura y Plan de Implementación
+# IntegrationsLab
 
-Proyecto orientado a practicar **integraciones reales con APIs
-externas** usando un backend **serverless con Supabase**.
+English · [Español](README.es.md)
 
-Objetivo del proyecto:
+---
 
--   Practicar integraciones con APIs reales
--   Diseñar arquitectura basada en **webhooks y eventos**
--   Documentar APIs con **OpenAPI / Swagger**
--   Publicar colección de **Postman**
--   Crear un **Integration Sandbox reutilizable** para futuros proyectos
+A sandbox for building and testing real-world API integrations on a
+**serverless Supabase backend**.
 
-------------------------------------------------------------------------
+**[Watch demo](https://www.youtube.com/watch?v=D1XIvs3ZUCQ)** · **[API Docs](https://jassoec.github.io/IntegrationsLab/)** · **[Postman Collection](https://www.postman.com/winter-station-87990/integrationslab/collection/53mm3kc/automated-notification-payment-system)** · **[Source Code](https://github.com/JassoEC/IntegrationsLab)**
 
-# Arquitectura General
+## How it works
+
+1. Message sent from WhatsApp
+2. Backend receives webhook from Twilio
+3. Message is processed and stored
+4. Automated response is triggered
+5. Operator replies from admin panel
+6. Reply delivered back to WhatsApp
+
+## What this project contains
+
+- **WhatsApp messaging** via Twilio and Meta Cloud API
+- **Webhook pipeline** with signature validation, event logging, and auto-reply automation
+- **Operator inbox dashboard** (Next.js) with real-time conversation threading
+- **OpenAPI documentation** — [jassoec.github.io/IntegrationsLab](https://jassoec.github.io/IntegrationsLab/)
+- **Postman collection** for end-to-end testing without spending provider quota
+
+---
+
+# Architecture
 
     Internet
        │
@@ -29,33 +44,24 @@ Objetivo del proyecto:
        ▼
     Postgres (Supabase)
 
-    API pública documentada
-    (OpenAPI / Swagger)
+    Public API documented with OpenAPI / Swagger
+    Testing via Postman Collection
 
-    Testing
-    (Postman Collection)
+The system is built in layers of increasing complexity:
+WhatsApp first (validates event architecture), then Stripe, then MercadoPago.
 
-El sistema se construye **por capas de complejidad**.
+---
 
-Primero se implementa **WhatsApp**, luego **Stripe**, y finalmente
-**MercadoPago**.
+# Phase 0 — Setup
 
-------------------------------------------------------------------------
+Initialize Supabase:
 
-# Fase 0 --- Setup
-
-Crear proyecto:
-
-    integration-sandbox
-
-Inicializar Supabase:
-
-``` bash
+```bash
 supabase init
 supabase start
 ```
 
-Estructura inicial:
+Initial structure:
 
     supabase/
        functions/
@@ -67,17 +73,13 @@ Estructura inicial:
     postman/
        collection.json
 
-------------------------------------------------------------------------
+---
 
-# Fase 1 --- Dominio Base
-
-Definir un dominio neutral para integraciones.
-
-## Tablas principales
+# Phase 1 — Base Domain
 
 ### messages
 
-``` sql
+```sql
 messages
 --------
 id           uuid, primary key
@@ -96,7 +98,7 @@ updated_at   timestamptz
 
 ### payments
 
-``` sql
+```sql
 payments
 --------
 id           uuid, primary key
@@ -114,7 +116,7 @@ updated_at   timestamptz
 
 ### webhook_events
 
-``` sql
+```sql
 webhook_events
 --------------
 id            uuid, primary key
@@ -127,28 +129,21 @@ processed_at  timestamptz
 created_at    timestamptz
 ```
 
-Esta tabla permite:
+This table supports debugging, event replay, and audit trails.
 
--   debugging
--   replay de eventos
--   auditoría
+---
 
-------------------------------------------------------------------------
+# Phase 2 — WhatsApp Integration
 
-# Fase 2 --- Integración WhatsApp
+WhatsApp is implemented first because it validates the full event architecture.
+Two providers are supported to cover the complete spectrum of scenarios:
 
-Primer proveedor porque valida la arquitectura de eventos.
-
-Se implementan dos proveedores para cubrir el espectro completo de escenarios:
-
-    Provider         Endpoint                       Caso de uso
+    Provider         Endpoint                       Use case
     ---------------- ------------------------------ ----------------------------------
-    Meta Cloud API   webhooks-whatsapp-meta         Clientes con Meta Business approval
-    Twilio           webhooks-whatsapp-twilio       Clientes sin approval / managed
+    Meta Cloud API   webhooks-whatsapp-meta         Clients with Meta Business approval
+    Twilio           webhooks-whatsapp-twilio       Clients without approval / managed
 
-## Arquitectura del módulo WhatsApp
-
-El módulo se divide en cuatro capas:
+## Module architecture
 
     whatsapp-gateway
        │
@@ -158,9 +153,9 @@ El módulo se divide en cuatro capas:
 
     conversation-service
        │
-       ├─ contacts             →  tabla contacts (upsert por phone_number)
-       ├─ conversations        →  tabla conversations (una abierta por contacto)
-       └─ messages             →  tabla messages (con conversation_id + contact_id)
+       ├─ contacts             →  contacts table (upsert by phone_number)
+       ├─ conversations        →  conversations table (one open per contact)
+       └─ messages             →  messages table (with conversation_id + contact_id)
 
     automation-engine
        │
@@ -170,9 +165,9 @@ El módulo se divide en cuatro capas:
        │
        ├─ send message         →  POST /messages-send
        ├─ conversations        →  GET  /conversations-list
-       └─ messages             →  GET  /conversations-get/:id  (con mensajes embebidos)
+       └─ messages             →  GET  /conversations-get/:id  (with embedded messages)
 
-## Flujo inbound completo
+## Inbound flow
 
     WhatsApp provider
        │
@@ -189,7 +184,7 @@ El módulo se divide en cuatro capas:
        ├─ 7. auto-reply (optional) →   keyword match → send + store outbound message
        └─ 8. mark processed        →   webhook_events (status: processed)
 
-## Flujo outbound (POST /messages-send)
+## Outbound flow (POST /messages-send)
 
     {to, body, provider}
        │
@@ -200,7 +195,7 @@ El módulo se divide en cuatro capas:
        ├─ store outbound message  →  messages (direction: outbound)
        └─ return {id, external_id, conversation_id, status}
 
-## Diferencias por proveedor
+## Provider differences
 
     Meta Cloud API                    Twilio
     --------------------------------- ---------------------------------
@@ -233,48 +228,40 @@ El módulo se divide en cuatro capas:
     conversation_id uuid fk → conversations
     contact_id      uuid fk → contacts
 
-RLS enabled on all tables. Edge functions use service_role key — no
-client-facing auth required at this layer.
+RLS enabled on all tables. Edge functions use the service_role key —
+no client-facing auth required at this layer.
 
-------------------------------------------------------------------------
+---
 
-# Fase 3 --- API Interna
-
-Endpoints del sistema:
+# Phase 3 — Internal API
 
     /messages/send
     /messages/list
     /payments/create
     /payments/list
 
-Ejemplo request:
+Example request:
 
     POST /messages/send
 
-``` json
+```json
 {
- "provider": "whatsapp",
- "to": "+521xxxxxxxx",
- "message": "Hola"
+  "provider": "whatsapp",
+  "to": "+521xxxxxxxx",
+  "message": "Hello"
 }
 ```
 
-Esto desacopla el dominio de los proveedores externos.
+---
 
-------------------------------------------------------------------------
+# Phase 4 — OpenAPI Documentation
 
-# Fase 4 --- Documentación OpenAPI
+File: `docs/openapi.yaml`
 
-Archivo:
-
-    docs/openapi.yaml
-
-Ejemplo:
-
-``` yaml
+```yaml
 openapi: 3.0.0
 info:
-  title: Integration Sandbox
+  title: IntegrationsLab
   version: 1.0
 
 paths:
@@ -287,162 +274,117 @@ paths:
       summary: WhatsApp webhook
 ```
 
-La documentación puede publicarse con:
+Published via ReDoc: **[jassoec.github.io/IntegrationsLab](https://jassoec.github.io/IntegrationsLab/)**
 
--   Swagger UI
--   Redoc
+---
 
-------------------------------------------------------------------------
+# Phase 5 — Postman Collection
 
-# Fase 5 --- Postman Collection
-
-Estructura sugerida:
-
-    Integration Sandbox
+    IntegrationsLab
 
     Messaging
-       send message
-       list messages
+       Send message
 
-    Webhooks
-       simulate whatsapp webhook
+    WhatsApp Webhooks
+       Twilio — Simulate inbound (local, no Twilio quota)
+       Meta — Simulate inbound
 
     Payments
-       create payment
+       Create payment
 
-Esto permite probar el sistema **sin interfaz UI**.
+Import from: `postman/collection.json`
 
-------------------------------------------------------------------------
+---
 
-# Fase 6 --- Integración Stripe
-
-Endpoints:
+# Phase 6 — Stripe Integration
 
     /payments/create?provider=stripe
     /webhooks/stripe
 
-Flujo:
+Flow:
 
     client
-       │
        │ create payment
        ▼
-    edge function
-       │
-       ▼
-    Stripe checkout
+    edge function → Stripe checkout
 
     Stripe webhook
        │
        ▼
-    /webhooks/stripe
-       │
-       ▼
-    payments.status = paid
+    /webhooks/stripe → payments.status = paid
 
-------------------------------------------------------------------------
+---
 
-# Fase 7 --- Integración MercadoPago
-
-Webhook:
+# Phase 7 — MercadoPago Integration
 
     /webhooks/mercadopago
 
-Flujo:
+Flow:
 
-    create preference
-       │
-    user pays
-       │
-    MercadoPago webhook
-       │
-    payments.status = approved
+    create preference → user pays → MercadoPago webhook → payments.status = approved
 
-------------------------------------------------------------------------
+---
 
-# Fase 8 --- Automatización de Eventos
+# Phase 8 — Event Automation
 
-Ejemplo:
+Example:
 
     payment succeeded
            │
            ▼
-    send whatsapp confirmation
+    send WhatsApp confirmation
 
 Pipeline:
 
-    Stripe webhook
-       │
-       ▼
-    update payment
-       │
-       ▼
-    trigger send message
+    Stripe webhook → update payment → trigger send message
 
-------------------------------------------------------------------------
+---
 
-# Estructura Final del Repositorio
+# Repository Structure
 
-    integration-sandbox
+    IntegrationsLab/
     │
-    ├ supabase
-    │  ├ migrations
+    ├ supabase/
+    │  ├ migrations/
     │  │    ├ 20260416142654_create_base_tables.sql
-    │  │    └ 20260417224824_conversation_service.sql   ← contacts, conversations, RLS
+    │  │    └ 20260417224824_conversation_service.sql
     │  │
-    │  └ functions
-    │       ├ _shared
+    │  └ functions/
+    │       ├ _shared/
     │       │    ├ twilio.ts         ← validateTwilioSignature + sendTwilioMessage
     │       │    ├ meta.ts           ← validateMetaSignature + sendMetaMessage
     │       │    ├ conversation.ts   ← upsertContact, upsertConversation, attach
     │       │    └ automation.ts     ← getAutoReply (keyword triggers)
     │       │
-    │       ├ webhooks-whatsapp-twilio    ← inbound + threading + auto-reply
-    │       ├ webhooks-whatsapp-meta      ← inbound + threading + auto-reply
+    │       ├ webhooks-whatsapp-twilio
+    │       ├ webhooks-whatsapp-meta
     │       ├ webhooks-stripe
     │       ├ webhooks-mercadopago
-    │       ├ messages-send               ← outbound (Twilio + Meta)
-    │       ├ conversations-list          ← GET list with contact info
-    │       ├ conversations-get           ← GET single with messages
+    │       ├ messages-send
+    │       ├ conversations-list
+    │       ├ conversations-get
     │       └ payments-create
     │
-    ├ docs
-    │   openapi.yaml
+    ├ dashboard/               ← Next.js operator inbox
     │
-    ├ postman
-    │   collection.json
+    ├ docs/
+    │   ├ openapi.yaml
+    │   └ index.html           ← ReDoc (GitHub Pages)
+    │
+    ├ postman/
+    │   └ collection.json
     │
     └ README.md
 
-------------------------------------------------------------------------
+---
 
-# Orden Recomendado de Implementación
+# Final Result
 
-1.  Supabase project
-2.  tablas base
-3.  webhook_events logging
-4.  WhatsApp webhook
-5.  Swagger docs
-6.  Postman collection
-7.  Stripe payments
-8.  MercadoPago payments
+An **Integration Sandbox API** with:
 
-------------------------------------------------------------------------
-
-# Resultado Final
-
-Un **Integration Sandbox API** con:
-
--   WhatsApp messaging
--   Stripe payments
--   MercadoPago payments
--   Webhook logging
--   OpenAPI documentation
--   Postman collection
-
-Este proyecto puede usarse para:
-
--   portafolio técnico
--   pruebas de integración
--   demos con clientes
--   base reutilizable para proyectos freelance
+- WhatsApp messaging (Twilio + Meta Cloud API)
+- Stripe payments
+- MercadoPago payments
+- Webhook logging and replay
+- OpenAPI documentation (ReDoc)
+- Postman collection
