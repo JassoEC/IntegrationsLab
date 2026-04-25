@@ -333,6 +333,127 @@ components:
                             phone_number_id:
                               type: string
 
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal payment record ID.
+        external_id:
+          type: string
+          description: Stripe Checkout Session ID (cs_...).
+        payment_url:
+          type: string
+          format: uri
+          description: Stripe-hosted checkout URL. Send this to the customer to complete payment.
+        status:
+          type: string
+          enum: [pending, processing, succeeded, failed, refunded]
+        provider:
+          type: string
+          example: stripe
+        amount:
+          type: number
+          format: float
+          example: 20.00
+        currency:
+          type: string
+          example: usd
+        created_at:
+          type: string
+          format: date-time
+
+    CreatePaymentRequest:
+      type: object
+      required: [amount, currency, customer_phone]
+      properties:
+        amount:
+          type: number
+          format: float
+          description: Payment amount as a decimal (e.g., 20.00 for $20 USD).
+          example: 20.00
+        currency:
+          type: string
+          description: ISO 4217 currency code.
+          example: usd
+        customer_phone:
+          type: string
+          description: |
+            Customer phone number in E.164 format. Used to send a WhatsApp
+            confirmation when the payment succeeds.
+          example: "+521234567890"
+        description:
+          type: string
+          description: Product or order description shown on the Stripe checkout page.
+          example: "Order #1042 — Pro Plan"
+        success_url:
+          type: string
+          format: uri
+          description: |
+            URL to redirect to after a successful payment.
+            Defaults to `STRIPE_SUCCESS_URL` env var if not provided.
+          example: "https://yourdomain.com/success"
+        cancel_url:
+          type: string
+          format: uri
+          description: |
+            URL to redirect to if the customer cancels.
+            Defaults to `STRIPE_CANCEL_URL` env var if not provided.
+          example: "https://yourdomain.com/cancel"
+
+    CreatePaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal payment record ID.
+        external_id:
+          type: string
+          description: Stripe Checkout Session ID.
+        payment_url:
+          type: string
+          format: uri
+          description: Stripe-hosted checkout page. Redirect the customer here to complete payment.
+        status:
+          type: string
+          example: pending
+
+    StripeWebhookPayload:
+      type: object
+      description: |
+        Stripe event object. Only `checkout.session.completed` and
+        `checkout.session.expired` are processed; all other event types
+        are acknowledged and ignored.
+      properties:
+        id:
+          type: string
+          example: "evt_1234567890"
+        type:
+          type: string
+          example: "checkout.session.completed"
+        data:
+          type: object
+          properties:
+            object:
+              type: object
+              description: The Stripe object that triggered the event (a Checkout Session).
+              properties:
+                id:
+                  type: string
+                  example: "cs_test_..."
+                payment_status:
+                  type: string
+                  example: "paid"
+                amount_total:
+                  type: integer
+                  description: Amount in smallest currency unit (cents).
+                  example: 2000
+                currency:
+                  type: string
+                  example: "usd"
+
 tags:
   - name: Auth
     description: |
@@ -348,6 +469,33 @@ tags:
 
       All endpoints are public (no Bearer token required) — designed to be called
       from internal services or trusted backend clients using the service role key.
+
+  - name: Stripe Payments
+    description: |
+      Create Stripe Checkout Sessions and manage payment records.
+
+      **Flow:**
+      1. Call `POST /functions/v1/payments-create` with amount, currency, and customer phone.
+      2. Redirect the customer to the returned `payment_url` (Stripe-hosted checkout).
+      3. Stripe calls `POST /functions/v1/webhooks-stripe` when payment completes.
+      4. The webhook handler updates the payment status and sends a WhatsApp confirmation.
+
+  - name: Stripe Webhooks
+    description: |
+      Inbound webhook endpoint for Stripe events.
+
+      **Signature validation:** Stripe signs every request with HMAC-SHA256.
+      The signature is sent in the `Stripe-Signature` header as
+      `t=<timestamp>,v1=<sig>`. Requests with an invalid signature or older
+      than 5 minutes return `401`.
+
+      **Handled events:**
+
+      | Event | Action |
+      |---|---|
+      | `checkout.session.completed` | Payment succeeded → update DB status + send WhatsApp |
+      | `checkout.session.expired` | Session expired → update DB status to `failed` |
+      | All others | Acknowledged (`200`) and ignored |
 
   - name: WhatsApp Webhooks
     description: |
@@ -721,6 +869,102 @@ paths:
                     type: integer
         '500':
           description: Database error.
+
+  /functions/v1/payments-create:
+    post:
+      tags: [Stripe Payments]
+      summary: Create a Stripe Checkout Session
+      description: |
+        Creates a Stripe-hosted Checkout Session for a given amount and returns
+        the `payment_url` the customer must visit to complete payment.
+
+        On success, a `payments` record is inserted with `status: pending`.
+        The `customer_phone` is stored in the payment metadata and used by the
+        webhook handler to send a WhatsApp confirmation once payment succeeds.
+
+        **Amount format:** pass the human-readable decimal amount (e.g., `20.00`
+        for $20 USD). The function converts to smallest unit (cents) when calling
+        Stripe.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequest'
+            examples:
+              usd:
+                summary: $20 USD payment
+                value:
+                  amount: 20.00
+                  currency: usd
+                  customer_phone: "+521234567890"
+                  description: "Order #1042 — Pro Plan"
+              mxn:
+                summary: 350 MXN payment
+                value:
+                  amount: 350.00
+                  currency: mxn
+                  customer_phone: "+521234567890"
+                  description: "Suscripción mensual"
+      responses:
+        '201':
+          description: Checkout Session created. Redirect customer to `payment_url`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePaymentResponse'
+        '400':
+          description: Invalid JSON body.
+        '422':
+          description: Missing required fields (amount, currency, customer_phone).
+        '502':
+          description: Stripe API call failed (invalid key, network error, etc.).
+        '500':
+          description: Payment record could not be stored in the database.
+
+  /functions/v1/webhooks-stripe:
+    post:
+      tags: [Stripe Webhooks]
+      summary: Receive Stripe webhook event
+      description: |
+        Called by Stripe when a payment event occurs on the configured webhook endpoint.
+
+        **Signature validation:** The `Stripe-Signature` header is verified with
+        HMAC-SHA256 against `STRIPE_WEBHOOK_SECRET`. Events older than 5 minutes
+        are rejected to prevent replay attacks.
+
+        **Processing flow:**
+        1. Validate `Stripe-Signature`
+        2. Persist raw event to `webhook_events`
+        3. If `checkout.session.completed` → update payment status to `succeeded`
+           and send WhatsApp notification to `customer_phone`
+        4. If `checkout.session.expired` → update payment status to `failed`
+        5. Mark event as `processed`
+        6. Return `200`
+
+        Stripe retries the webhook up to 3 days if it does not receive a `2xx`.
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+          description: HMAC-SHA256 signature computed by Stripe. Format — `t=<timestamp>,v1=<sig>`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StripeWebhookPayload'
+      responses:
+        '200':
+          description: Event received and processed. Empty body.
+        '401':
+          description: Invalid or expired Stripe signature.
+        '400':
+          description: Malformed JSON body.
+        '500':
+          description: Failed to persist event to the database.
 
   /functions/v1/conversations-get/{id}:
     get:

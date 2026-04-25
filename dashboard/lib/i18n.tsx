@@ -32,6 +32,29 @@ const translations = {
       send: 'Send',
       sending: '…',
     },
+    stripe: {
+      title: 'Stripe Payments',
+      nav: 'Payments',
+      form: {
+        title: 'Create test payment',
+        amount: 'Amount',
+        currency: 'Currency',
+        phone: 'Customer phone',
+        description: 'Description',
+        submit: 'Create checkout session',
+        sending: 'Creating…',
+        success: 'Session created — open the link to pay',
+      },
+      payments: {
+        title: 'Payments',
+        empty: 'No payments yet',
+        pay: 'Pay',
+      },
+      events: {
+        title: 'Webhook events',
+        empty: 'No events yet',
+      },
+    },
   },
   es: {
     header: {
@@ -61,6 +84,29 @@ const translations = {
       placeholder: 'Escribe un mensaje… (Enter para enviar)',
       send: 'Enviar',
       sending: '…',
+    },
+    stripe: {
+      title: 'Pagos Stripe',
+      nav: 'Pagos',
+      form: {
+        title: 'Crear pago de prueba',
+        amount: 'Monto',
+        currency: 'Moneda',
+        phone: 'Teléfono del cliente',
+        description: 'Descripción',
+        submit: 'Crear sesión de pago',
+        sending: 'Creando…',
+        success: 'Sesión creada — abre el enlace para pagar',
+      },
+      payments: {
+        title: 'Pagos',
+        empty: 'Sin pagos aún',
+        pay: 'Pagar',
+      },
+      events: {
+        title: 'Eventos del webhook',
+        empty: 'Sin eventos aún',
+      },
     },
   },
 } as const

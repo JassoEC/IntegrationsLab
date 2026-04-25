@@ -64,6 +64,22 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <header className="h-11 border-b border-gray-800 flex items-center px-5 shrink-0 gap-3">
         <span className="font-semibold tracking-wide">IntegrationsLab</span>
         <span className="text-gray-500 text-xs">{t.header.subtitle}</span>
+
+        <nav className="flex items-center gap-1 ml-4">
+          <Link
+            href="/"
+            className={`px-2.5 py-1 rounded text-xs transition-colors ${pathname === '/' || pathname.startsWith('/conversations') ? 'bg-gray-800 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            WhatsApp
+          </Link>
+          <Link
+            href="/stripe"
+            className={`px-2.5 py-1 rounded text-xs transition-colors ${pathname === '/stripe' ? 'bg-gray-800 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            {t.stripe.nav}
+          </Link>
+        </nav>
+
         <div className="ml-auto flex items-center gap-1 text-xs border border-gray-700 rounded-md overflow-hidden">
           <button
             onClick={() => setLocale('en')}
