@@ -369,6 +369,12 @@ verify_jwt = false
 [functions.conversations-get]
 verify_jwt = false
 
+[functions.payments-create]
+verify_jwt = false
+
+[functions.webhooks-stripe]
+verify_jwt = false
+
 [edge_runtime]
 enabled = true
 # Supported request policies: `oneshot`, `per_worker`.

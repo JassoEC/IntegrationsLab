@@ -44,6 +44,16 @@
       "key": "SIMULATE_FROM",
       "value": "whatsapp:+521234567890",
       "description": "Phone number used as the sender in local simulations. Use the number registered in the Twilio sandbox."
+    },
+    {
+      "key": "STRIPE_WEBHOOK_SECRET",
+      "value": "",
+      "description": "Stripe webhook signing secret (whsec_...). Found in Stripe Dashboard > Developers > Webhooks > your endpoint."
+    },
+    {
+      "key": "STRIPE_SESSION_ID",
+      "value": "",
+      "description": "Set automatically after Create Payment. Used by the webhook simulation to reference the correct Stripe session."
     }
   ],
   "item": [
@@ -567,6 +577,135 @@
                   "  if (pm.response.code === 401) {",
                   "    console.warn('Signature validation active — set META_APP_SECRET in .env or use a real Meta request.');",
                   "  }",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Stripe Payments",
+      "description": "Create Stripe Checkout Sessions and simulate the payment webhook.\n\n**Flow:**\n1. Run **Create Payment** → copy the `payment_url` and open it in the browser\n2. Complete payment with Stripe test card `4242 4242 4242 4242`\n3. Stripe fires the webhook automatically — or use **Simulate Webhook** to trigger it locally without going through the browser",
+      "item": [
+        {
+          "name": "Create Payment",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/payments-create",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 20.00,\n  \"currency\": \"usd\",\n  \"customer_phone\": \"+521234567890\",\n  \"description\": \"Order #1001 — Pro Plan\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "description": "Creates a Stripe Checkout Session and stores a `pending` payment record.\n\nReturns a `payment_url` — open it in the browser to complete the payment with Stripe test card `4242 4242 4242 4242`.\n\nThe `customer_phone` is saved in the payment metadata and used by the webhook handler to send a WhatsApp confirmation on success.\n\nThe `STRIPE_SESSION_ID` collection variable is set automatically by the test script for use in the webhook simulation."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Payment created', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const res = pm.response.json();",
+                  "  pm.expect(res.payment_url).to.be.a('string');",
+                  "  pm.expect(res.external_id).to.be.a('string');",
+                  "  pm.collectionVariables.set('STRIPE_SESSION_ID', res.external_id);",
+                  "  console.log('Session ID saved:', res.external_id);",
+                  "  console.log('Payment URL:', res.payment_url);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Simulate Webhook — checkout.session.completed",
+          "request": {
+            "method": "POST",
+            "url": "{{SUPABASE_URL}}/functions/v1/webhooks-stripe",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Stripe-Signature",
+                "value": "{{_stripe_sig}}",
+                "description": "Computed by the pre-request script using HMAC-SHA256 over timestamp + body."
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{{_stripe_body}}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "description": "Simulates a `checkout.session.completed` Stripe event directly against the local edge function — no real Stripe call needed.\n\nThe pre-request script:\n1. Reads `STRIPE_SESSION_ID` (set automatically by Create Payment)\n2. Builds a realistic Stripe event payload\n3. Computes the `Stripe-Signature` header (HMAC-SHA256, same algorithm as production)\n\n**Before running:**\n1. Set `STRIPE_WEBHOOK_SECRET` in collection variables (same value as in `supabase/functions/.env`)\n2. Run **Create Payment** first so `STRIPE_SESSION_ID` is populated — or paste a session ID manually"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// ── Collect inputs ────────────────────────────────────────────────────",
+                  "const secret    = pm.collectionVariables.get('STRIPE_WEBHOOK_SECRET');",
+                  "const sessionId = pm.collectionVariables.get('STRIPE_SESSION_ID') || 'cs_test_placeholder';",
+                  "",
+                  "if (!secret) { throw new Error('Set STRIPE_WEBHOOK_SECRET in collection variables'); }",
+                  "",
+                  "// ── Build event payload ───────────────────────────────────────────────",
+                  "const timestamp = Math.floor(Date.now() / 1000);",
+                  "const event = {",
+                  "  id: 'evt_test_' + Date.now(),",
+                  "  type: 'checkout.session.completed',",
+                  "  data: {",
+                  "    object: {",
+                  "      id: sessionId,",
+                  "      payment_status: 'paid',",
+                  "      amount_total: 2000,",
+                  "      currency: 'usd'",
+                  "    }",
+                  "  }",
+                  "};",
+                  "",
+                  "const body = JSON.stringify(event);",
+                  "",
+                  "// ── Compute Stripe HMAC-SHA256 signature ─────────────────────────────",
+                  "// Algorithm: HMAC-SHA256 of '<timestamp>.<rawBody>' using webhook secret.",
+                  "const payload = timestamp + '.' + body;",
+                  "const hash = CryptoJS.HmacSHA256(payload, secret);",
+                  "const sigHex = CryptoJS.enc.Hex.stringify(hash);",
+                  "",
+                  "pm.variables.set('_stripe_sig',  't=' + timestamp + ',v1=' + sigHex);",
+                  "pm.variables.set('_stripe_body', body);",
+                  "",
+                  "console.log('Stripe signature computed for session:', sessionId);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Webhook processed (200)', () => {",
+                  "  if (pm.response.code === 401) {",
+                  "    console.error('Signature mismatch — verify STRIPE_WEBHOOK_SECRET matches supabase/functions/.env exactly.');",
+                  "  }",
+                  "  pm.response.to.have.status(200);",
                   "});"
                 ]
               }
